@@ -65,7 +65,7 @@
     <div class="grp">
       <h2>이펙트 합성 (별도 레이어)</h2>
       <div class="row"><label>이펙트 불투명도 <b id="vMix"></b></label>
-        <input id="mix" type="range" min="0" max="1" step="0.01" value="0.3" /></div>
+        <input id="mix" type="range" min="0" max="1" step="0.01" value="0.15" /></div>
     </div>
 
     <div class="grp">
@@ -259,12 +259,18 @@ function loadImage(img){
   resizeAndDraw(false);
 }
 let fullImg = null;
+let srcName = '';   // 불러온 원본 파일명
 
 function fileToImg(file){
   if(!file || !file.type.startsWith('image/')) return;
+  srcName = file.name || 'image.png';
   const img = new Image();
   img.onload = ()=>loadImage(img);
   img.src = URL.createObjectURL(file);
+}
+function ledName(){
+  const base = (srcName || 'image').replace(/\.[^.]+$/, '');
+  return 'led_' + base + '.png';
 }
 
 /* ---------- controls ---------- */
@@ -333,20 +339,44 @@ window.addEventListener('paste', ev=>{
   if(it) fileToImg(it.getAsFile());
 });
 
-/* save */
-e('save').addEventListener('click', ()=>{
+/* save — 저장 대화상자(폴더 직접 선택, 마지막 폴더 기억) + led_ 파일명 */
+e('save').addEventListener('click', async ()=>{
   if(!hasImg){ alert('이미지를 먼저 불러오세요.'); return; }
+  const suggested = ledName();
+
+  // 1) 가능하면 네이티브 저장 대화상자 먼저 띄움(사용자 제스처 유지)
+  let handle = null;
+  if(window.showSaveFilePicker){
+    try{
+      handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types:[{ description:'PNG 이미지', accept:{'image/png':['.png']} }]
+      });
+    }catch(err){
+      if(err && err.name === 'AbortError') return; // 사용자가 취소
+      handle = null; // 그 외 오류는 폴백
+    }
+  }
+
+  // 2) 렌더 후 PNG 출력
   const hi = e('hires').checked;
   resizeAndDraw(hi);
-  cv.toBlob(b=>{
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(b); a.download='led_screen.png'; a.click();
+  cv.toBlob(async (blob)=>{
+    if(handle){
+      try{
+        const w = await handle.createWritable();
+        await w.write(blob); await w.close();
+      }catch(err){ alert('저장 실패: ' + err); }
+    } else {
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=suggested; a.click();
+    }
     if(hi) resizeAndDraw(false); // 미리보기 해상도로 복귀
   },'image/png');
 });
 
 /* reset */
-const defaults = {mix:0.3,cols:130,dot:0.80,gap:0.03,glow:0.15,bri:0.0,scan:0.05,abb:0,noise:0.0,mode:'1'};
+const defaults = {mix:0.15,cols:130,dot:0.80,gap:0.03,glow:0.15,bri:0.0,scan:0.05,abb:0,noise:0.0,mode:'1'};
 e('reset').addEventListener('click', ()=>{
   for(const k in defaults) ctl[k].value = defaults[k];
   setLabels(); draw();
