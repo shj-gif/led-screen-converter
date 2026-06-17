@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>더캔버스웍스 — LED Screen Converter v1.0</title>
+<style>
+  :root { --bg:#0d0e12; --panel:#16181f; --line:#262a35; --txt:#d8dbe4; --sub:#8b90a0; --acc:#4ea1ff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt);
+    font-family:'Segoe UI',system-ui,sans-serif; }
+  #app { display:flex; height:100vh; }
+  #stage { flex:1; display:flex; align-items:center; justify-content:center;
+    position:relative; overflow:hidden; background:
+      repeating-conic-gradient(#1a1c22 0% 25%, #15171c 0% 50%) 50%/24px 24px; }
+  #stage.drag { outline:2px dashed var(--acc); outline-offset:-12px; }
+  #glcanvas { max-width:96%; max-height:96%; box-shadow:0 8px 40px rgba(0,0,0,.6);
+    image-rendering:auto; background:#000; }
+  #hint { position:absolute; color:var(--sub); font-size:14px; pointer-events:none;
+    text-align:center; line-height:1.7; }
+  #panel { width:320px; background:var(--panel); border-left:1px solid var(--line);
+    padding:18px; overflow-y:auto; }
+  h1 { font-size:15px; margin:0 0 4px; letter-spacing:.3px; }
+  h1 .muted { color:var(--sub); font-weight:400; }
+  h1 .ver { font-size:10px; color:#04101f; background:var(--acc); border-radius:5px;
+    padding:1px 6px; vertical-align:middle; font-weight:700; }
+  .sub { font-size:11px; color:var(--sub); margin:0 0 16px; line-height:1.5; }
+  .row { margin:12px 0; }
+  .row label { display:flex; justify-content:space-between; font-size:12px;
+    color:var(--sub); margin-bottom:5px; }
+  .row label b { color:var(--txt); font-weight:600; }
+  .lab-right { margin-left:auto; display:flex; align-items:center; gap:6px; }
+  .rst { width:auto; min-width:0; padding:0 6px; height:18px; line-height:16px;
+    font-size:11px; background:#222633; border:1px solid var(--line);
+    color:var(--sub); border-radius:5px; cursor:pointer; }
+  .rst:hover { color:var(--acc); border-color:var(--acc); }
+  input[type=range]{ width:100%; accent-color:var(--acc); }
+  select, button { width:100%; padding:8px; background:#1f222b; color:var(--txt);
+    border:1px solid var(--line); border-radius:7px; font-size:13px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--acc); color:#04101f; border:none; font-weight:700; }
+  button:hover { filter:brightness(1.1); }
+  .grp { border-top:1px solid var(--line); margin-top:16px; padding-top:6px; }
+  .grp h2 { font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--sub); margin:8px 0; }
+  .btns { display:flex; gap:8px; margin-top:6px; }
+  .chk { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--sub); }
+  .chk input { accent-color:var(--acc); }
+  .file { display:block; margin-top:6px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="glcanvas"></canvas>
+    <div id="hint">이미지를 드래그&amp;드롭 하거나<br/>오른쪽에서 파일 선택</div>
+  </div>
+
+  <div id="panel">
+    <h1>더캔버스웍스 <span class="muted">— LED Screen Converter</span> <span class="ver">v1.0</span></h1>
+    <p class="sub">이미지를 LED 영상 벽 룩으로 변환합니다. WebGL · 실시간.</p>
+
+    <input id="file" class="file" type="file" accept="image/*" />
+
+    <div class="grp">
+      <h2>이펙트 합성 (별도 레이어)</h2>
+      <div class="row"><label>이펙트 불투명도 <b id="vMix"></b></label>
+        <input id="mix" type="range" min="0" max="1" step="0.01" value="0.3" /></div>
+    </div>
+
+    <div class="grp">
+      <h2>패널 / 픽셀</h2>
+      <div class="row">
+        <label>LED 형태</label>
+        <select id="mode">
+          <option value="1" selected>사각 픽셀 (Square) — 영상 룩</option>
+          <option value="0">둥근 도트 (Round)</option>
+          <option value="2">RGB 서브픽셀 (Stripe)</option>
+        </select>
+      </div>
+      <div class="row"><label>해상도 (가로 LED 수) <b id="vCols"></b></label>
+        <input id="cols" type="range" min="20" max="600" value="130" /></div>
+      <div class="row"><label>도트 크기 (셀 채움) <b id="vDot"></b></label>
+        <input id="dot" type="range" min="0.3" max="1" step="0.01" value="0.80" /></div>
+      <div class="row"><label>간격 어둡기 (패널 gap) <b id="vGap"></b></label>
+        <input id="gap" type="range" min="0" max="0.4" step="0.01" value="0.03" /></div>
+    </div>
+
+    <div class="grp">
+      <h2>발광 / 톤</h2>
+      <div class="row"><label>글로우 (Bloom) <b id="vGlow"></b></label>
+        <input id="glow" type="range" min="0" max="1.5" step="0.01" value="0.15" /></div>
+      <div class="row"><label>밝기 <b id="vBri"></b></label>
+        <input id="bri" type="range" min="-0.3" max="0.5" step="0.01" value="0.0" /></div>
+    </div>
+
+    <div class="grp">
+      <h2>디테일</h2>
+      <div class="row"><label>스캔라인 <b id="vScan"></b></label>
+        <input id="scan" type="range" min="0" max="1" step="0.01" value="0.05" /></div>
+      <div class="row"><label>RGB 스플릿 <b id="vAbb"></b></label>
+        <input id="abb" type="range" min="0" max="8" step="0.05" value="0" /></div>
+      <div class="row"><label>노이즈 <b id="vNoise"></b></label>
+        <input id="noise" type="range" min="0" max="0.3" step="0.01" value="0.0" /></div>
+    </div>
+
+    <div class="grp">
+      <h2>내보내기</h2>
+      <div class="row chk"><input id="hires" type="checkbox" checked />
+        <label style="margin:0;color:var(--sub)">원본 해상도로 저장 (느림)</label></div>
+      <div class="btns">
+        <button id="reset">초기화</button>
+        <button id="save" class="primary">PNG 저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('glcanvas');
+const gl = cv.getContext('webgl', { preserveDrawingBuffer:true, premultipliedAlpha:false });
+if(!gl){ alert('이 브라우저는 WebGL을 지원하지 않습니다.'); }
+
+/* ---------- shaders ---------- */
+const VERT = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main(){ vUv = aPos*0.5+0.5; vUv.y = 1.0 - vUv.y; gl_Position = vec4(aPos,0.0,1.0); }`;
+
+const FRAG = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uImg;
+uniform vec2  uGrid;     // cols, rows
+uniform float uMode;     // 0 round,1 square,2 rgb
+uniform float uDot;      // dot size 0..1
+uniform float uGap;      // panel gap darkness
+uniform float uGlow;
+uniform float uBri;
+uniform float uScan, uAbb, uNoise, uSeed;
+uniform float uMix;      // 이펙트 레이어 불투명도 (0 원본 ~ 1 LED)
+
+vec3 adjust(vec3 c){
+  return max(c + uBri, 0.0);                 // brightness only
+}
+float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)))*43758.5453); }
+
+// 셀 영역을 4x4=16탭으로 평균(박스 다운샘플) → 점샘플 깨짐 방지
+vec3 boxSample(vec2 base, vec2 grid){
+  vec3 acc = vec3(0.0);
+  const int N = 4;
+  for(int y=0; y<N; y++){
+    for(int x=0; x<N; x++){
+      vec2 frac = (vec2(float(x),float(y))+0.5)/float(N) - 0.5; // -0.5..0.5
+      acc += texture2D(uImg, clamp(base + frac/grid, 0.0, 1.0)).rgb;
+    }
+  }
+  return acc/float(N*N);
+}
+
+void main(){
+  vec2 off = vec2(uAbb/uGrid.x, 0.0);
+
+  vec2 cell  = vUv * uGrid;
+  vec2 id    = (floor(cell)+0.5)/uGrid;     // cell center uv
+  vec2 cuv   = fract(cell) - 0.5;           // -0.5..0.5 within cell
+
+  // 셀 영역 평균으로 색 샘플(픽셀화)
+  vec3 col = boxSample(id, uGrid);
+  if(uAbb > 0.001){
+    col.r = boxSample(clamp(id+off,0.0,1.0), uGrid).r;
+    col.b = boxSample(clamp(id-off,0.0,1.0), uGrid).b;
+  }
+  col = adjust(col);
+
+  vec3 outc;
+  if(uMode > 1.5){
+    // RGB 서브픽셀: 셀을 가로 3분할
+    float band = floor(fract(cell.x)*3.0);
+    vec3 mask = band<0.5 ? vec3(1.0,0.0,0.0)
+              : band<1.5 ? vec3(0.0,1.0,0.0)
+                         : vec3(0.0,0.0,1.0);
+    float vy = 1.0 - smoothstep(uDot*0.5, uDot*0.5+0.06, abs(cuv.y)); // 세로 마스크
+    outc = col * mask * vy;
+    outc += col * uGap;
+  } else {
+    float d = (uMode<0.5) ? length(cuv) : max(abs(cuv.x),abs(cuv.y));
+    float r = uDot*0.5;
+    float core = 1.0 - smoothstep(r-0.06, r, d);
+    float halo = 1.0 - smoothstep(r, r + 0.18 + uGlow*0.5, d);
+    outc = col*core + col*halo*halo*uGlow;
+    outc = max(outc, col*uGap);             // gap에 패널 잔광
+  }
+
+  // 스캔라인 (가로)
+  float sc = 1.0 - uScan*0.6*(0.5 - 0.5*cos(cell.y*6.2831853));
+  outc *= sc;
+
+  // 노이즈
+  if(uNoise > 0.001){
+    float n = rnd(vUv*uGrid + uSeed) - 0.5;
+    outc += n * uNoise;
+  }
+
+  // 이펙트 레이어 ↔ 원본 크로스페이드(전체 불투명도)
+  vec3 orig = texture2D(uImg, vUv).rgb;
+  vec3 finalCol = mix(orig, max(outc,0.0), uMix);
+  gl_FragColor = vec4(finalCol, 1.0);
+}`;
+
+function compile(type, src){
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+['uGrid','uMode','uDot','uGap','uGlow','uBri','uScan','uAbb','uNoise','uSeed','uMix','uImg']
+  .forEach(n => U[n] = gl.getUniformLocation(prog, n));
+
+/* ---------- texture / image ---------- */
+let tex = gl.createTexture();
+let imgW = 0, imgH = 0, hasImg = false;
+const MAX = 4096; // 미리보기 내부 처리 상한(이보다 큰 원본만 축소)
+
+function loadImage(img){
+  let w = img.naturalWidth, h = img.naturalHeight;
+  const scale = Math.min(1, MAX/Math.max(w,h));
+  imgW = Math.round(w*scale); imgH = Math.round(h*scale);
+  // 텍스처 업로드 (full res 원본 보관용 따로)
+  fullImg = img;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  hasImg = true;
+  // 슬라이더 최대 = 원본 가로 픽셀 수(최대치=원본만큼 선명, 그 이상은 의미 없음)
+  const colsEl = document.getElementById('cols');
+  colsEl.max = Math.max(100, Math.min(3000, img.naturalWidth));
+  // 글자/디테일이 살아있는 미세 LED 기본값(셀 ≈ 3px). defaults도 갱신해 리셋 기준 일치
+  const fine = Math.min(+colsEl.max, Math.round(img.naturalWidth/3));
+  colsEl.value = fine; defaults.cols = fine;
+  setLabels();
+  document.getElementById('hint').style.display = 'none';
+  resizeAndDraw(false);
+}
+let fullImg = null;
+
+function fileToImg(file){
+  if(!file || !file.type.startsWith('image/')) return;
+  const img = new Image();
+  img.onload = ()=>loadImage(img);
+  img.src = URL.createObjectURL(file);
+}
+
+/* ---------- controls ---------- */
+const ctl = {
+  cols:e('cols'), dot:e('dot'), gap:e('gap'), glow:e('glow'),
+  bri:e('bri'), scan:e('scan'),
+  abb:e('abb'), noise:e('noise'), mode:e('mode'), mix:e('mix')
+};
+function e(id){ return document.getElementById(id); }
+function setLabels(){
+  e('vCols').textContent = ctl.cols.value;
+  e('vDot').textContent  = (+ctl.dot.value).toFixed(2);
+  e('vGap').textContent  = (+ctl.gap.value).toFixed(2);
+  e('vGlow').textContent = (+ctl.glow.value).toFixed(2);
+  e('vBri').textContent  = (+ctl.bri.value).toFixed(2);
+  e('vScan').textContent = (+ctl.scan.value).toFixed(2);
+  e('vAbb').textContent  = (+ctl.abb.value).toFixed(2);
+  e('vNoise').textContent= (+ctl.noise.value).toFixed(2);
+  e('vMix').textContent  = (+ctl.mix.value).toFixed(2);
+}
+
+function draw(){
+  if(!hasImg) return;
+  const cols = +ctl.cols.value;
+  const rows = Math.max(4, Math.round(cols * imgH/imgW));
+  gl.viewport(0,0,cv.width,cv.height);
+  gl.useProgram(prog);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(U.uImg, 0);
+  gl.uniform2f(U.uGrid, cols, rows);
+  gl.uniform1f(U.uMode, +ctl.mode.value);
+  gl.uniform1f(U.uDot, +ctl.dot.value);
+  gl.uniform1f(U.uGap, +ctl.gap.value);
+  gl.uniform1f(U.uGlow, +ctl.glow.value);
+  gl.uniform1f(U.uBri, +ctl.bri.value);
+  gl.uniform1f(U.uScan, +ctl.scan.value);
+  gl.uniform1f(U.uAbb, +ctl.abb.value);
+  gl.uniform1f(U.uNoise, +ctl.noise.value);
+  gl.uniform1f(U.uMix, +ctl.mix.value);
+  gl.uniform1f(U.uSeed, 0.0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function resizeAndDraw(hi){
+  if(!hasImg) return;
+  let w = imgW, h = imgH;
+  if(hi && fullImg){
+    w = fullImg.naturalWidth; h = fullImg.naturalHeight;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, fullImg);
+  }
+  cv.width = w; cv.height = h;
+  draw();
+}
+
+Object.values(ctl).forEach(c => c.addEventListener('input', ()=>{ setLabels(); draw(); }));
+
+/* file input + drag&drop */
+e('file').addEventListener('change', ev => fileToImg(ev.target.files[0]));
+const stage = document.getElementById('stage');
+['dragenter','dragover'].forEach(t=>stage.addEventListener(t,ev=>{ev.preventDefault();stage.classList.add('drag');}));
+['dragleave','drop'].forEach(t=>stage.addEventListener(t,ev=>{ev.preventDefault();stage.classList.remove('drag');}));
+stage.addEventListener('drop', ev=>{ if(ev.dataTransfer.files[0]) fileToImg(ev.dataTransfer.files[0]); });
+window.addEventListener('paste', ev=>{
+  const it=[...(ev.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));
+  if(it) fileToImg(it.getAsFile());
+});
+
+/* save */
+e('save').addEventListener('click', ()=>{
+  if(!hasImg){ alert('이미지를 먼저 불러오세요.'); return; }
+  const hi = e('hires').checked;
+  resizeAndDraw(hi);
+  cv.toBlob(b=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b); a.download='led_screen.png'; a.click();
+    if(hi) resizeAndDraw(false); // 미리보기 해상도로 복귀
+  },'image/png');
+});
+
+/* reset */
+const defaults = {mix:0.3,cols:130,dot:0.80,gap:0.03,glow:0.15,bri:0.0,scan:0.05,abb:0,noise:0.0,mode:'1'};
+e('reset').addEventListener('click', ()=>{
+  for(const k in defaults) ctl[k].value = defaults[k];
+  setLabels(); draw();
+});
+
+setLabels();
+
+/* 슬라이더별 개별 리셋(↺) 버튼 */
+document.querySelectorAll('#panel .row').forEach(row=>{
+  const r = row.querySelector('input[type=range]');
+  if(!r) return;
+  const label = row.querySelector('label');
+  const right = document.createElement('span');
+  right.className = 'lab-right';
+  const valB = label.querySelector('b');
+  if(valB) right.appendChild(valB);            // 값 표시를 오른쪽 그룹으로
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'rst'; btn.textContent = '↺';
+  btn.title = '이 값만 초기화';
+  btn.addEventListener('click', ()=>{
+    if(defaults[r.id] !== undefined){ r.value = defaults[r.id]; setLabels(); draw(); }
+  });
+  right.appendChild(btn);
+  label.appendChild(right);
+});
+</script>
+</body>
+</html>
